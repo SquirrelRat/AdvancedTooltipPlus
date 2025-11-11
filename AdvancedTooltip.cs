@@ -347,12 +347,11 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
                 _ => default
             };
 
-            // Check for special domains
-            affixTextColor = item.Record.Domain switch
+            // Check for special domains (Crafted mods get purple color)
+            if (item.Record.Domain == ModDomain.Crafted)
             {
-                ModDomain.Crafted => settings.SpecialColors.CraftedColor,
-                _ => affixTextColor
-            };
+                affixTextColor = new Color(180, 96, 255);
+            }
 
             var affixTierText = (totalTiers > 1 ? $"T{item.Tier} " : string.Empty);
             var affixTierSize = item.AffixType switch

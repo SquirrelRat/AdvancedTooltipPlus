@@ -53,8 +53,6 @@ public class ItemModsSettings
     public ColorNode T2Color { get; set; } = new ColorBGRA(0, 255, 255, 255);
     public ColorNode T3Color { get; set; } = new ColorBGRA(0, 255, 0, 255);
     
-    public SpecialColorsSettings SpecialColors { get; set; } = new();
-    
     [Menu("Dump Mod Names", "Hotkey to copy mod names to clipboard (for debugging)")]
     public HotkeyNode DumpModNames { get; set; } = new HotkeyNode(System.Windows.Forms.Keys.None);
     
@@ -69,11 +67,4 @@ public class ItemModsSettings
         }
         return false;
     }
-}
-
-[Submenu(CollapsedByDefault = true)]
-public class SpecialColorsSettings
-{
-    public ColorNode AbyssalColor { get; set; } = new ColorBGRA(30, 130, 0, 255);
-    public ColorNode CraftedColor { get; set; } = new ColorBGRA(180, 96, 255, 255);
 }

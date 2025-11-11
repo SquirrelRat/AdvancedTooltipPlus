@@ -92,30 +92,33 @@ public class FastModsModule
         List<ModTierInfo> modTierInfo = new List<ModTierInfo>();
         foreach (ModValue mod in modValues.OrderBy(m => m.AffixType).ThenBy(m => m.Tier))
         {
-            if (mod.Tags.Count <= 0)
+            // Skip implicits, uniques, and corrupted mods for FastMods
+            if (mod.AffixType == ModType.Unique || mod.AffixType == ModType.Corrupted || mod.IsImplicit)
+            {
+                continue;
+            }
+
+            // Skip if not a prefix or suffix
+            if (mod.AffixType != ModType.Prefix && mod.AffixType != ModType.Suffix)
             {
                 continue;
             }
 
             string affix = string.Empty;
             Color color = Color.White;
-            switch (mod.AffixType)
+            
+            if (mod.AffixType == ModType.Prefix)
             {
-                case ModType.Prefix:
-                    affix = "P";
-                    color = _modsSettings.PrefixColor;
-                    break;
-                case ModType.Suffix:
-                    affix = "S";
-                    color = _modsSettings.SuffixColor;
-                    break;
-                case ModType.Unique:
-                    affix = "I";
-                    continue;
-                default:
-                    affix = "?";
-                    break;
+                affix = "P";
+                color = _modsSettings.PrefixColor;
             }
+            else if (mod.AffixType == ModType.Suffix)
+            {
+                affix = "S";
+                color = _modsSettings.SuffixColor;
+            }
+
+            // Color by tier
             color = mod.Tier switch
             {
                 1 => _modsSettings.T1Color,
@@ -123,30 +126,44 @@ public class FastModsModule
                 3 => _modsSettings.T3Color,
                 _ => color
             };
-            affix += mod.Tier;
+            
+            // Add tier to display if it exists
+            if (mod.Tier > 0)
+            {
+                affix += mod.Tier;
+            }
+            else
+            {
+                affix += "?";
+            }
 
             ModTierInfo currentModTierInfo = new ModTierInfo(affix, color);
 
-            foreach (string tag in mod.Tags)
+            // Add tags if they exist (optional feature - may not work in PoE1)
+            if (_modsSettings.EnableFastModsTags && mod.Tags.Count > 0)
             {
-                var modTagColor = tag switch
+                foreach (string tag in mod.Tags)
                 {
-                    "Fire" => Color.Red,
-                    "Cold" => new Color(41, 102, 241),
-                    "Life" => Color.Magenta,
-                    "Lightning" => Color.Yellow,
-                    "Physical" => new Color(225, 170, 20),
-                    "Critical" => new Color(168, 220, 26),
-                    "Mana" => new Color(20, 240, 255),
-                    "Attack" => new Color(240, 100, 30),
-                    "Speed" => new Color(0, 255, 192),
-                    "Caster" => new Color(216, 0, 255),
-                    "Elemental" => Color.White,
-                    "Gem Level" => new Color(200, 230, 160),
-                    _ => Color.Gray
-                };
-                currentModTierInfo.ModTags.Add(new ModTag(tag, modTagColor));
+                    var modTagColor = tag switch
+                    {
+                        "Fire" => Color.Red,
+                        "Cold" => new Color(41, 102, 241),
+                        "Life" => Color.Magenta,
+                        "Lightning" => Color.Yellow,
+                        "Physical" => new Color(225, 170, 20),
+                        "Critical" => new Color(168, 220, 26),
+                        "Mana" => new Color(20, 240, 255),
+                        "Attack" => new Color(240, 100, 30),
+                        "Speed" => new Color(0, 255, 192),
+                        "Caster" => new Color(216, 0, 255),
+                        "Elemental" => Color.White,
+                        "Gem Level" => new Color(200, 230, 160),
+                        _ => Color.Gray
+                    };
+                    currentModTierInfo.ModTags.Add(new ModTag(tag, modTagColor));
+                }
             }
+            
             modTierInfo.Add(currentModTierInfo);
         }
         return modTierInfo;
