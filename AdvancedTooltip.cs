@@ -280,9 +280,9 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             // Display the mod text
             if (!string.IsNullOrEmpty(item.HumanName))
             {
-                var affixTypeWidth = Graphics.MeasureText(craftedText + " ").X;
+                var craftedLabelWidth = Graphics.MeasureText(craftedText + " ").X;
                 var displayText = item.HumanName;
-                var txSize = Graphics.DrawText($" {displayText}", position.Translate(affixTypeWidth, 0), Color.Gainsboro);
+                var txSize = Graphics.DrawText($" {displayText}", position.Translate(craftedLabelWidth, 0), Color.Gainsboro);
                 position.Y += txSize.Y;
             }
             
