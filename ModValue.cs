@@ -262,6 +262,7 @@ public class ModValue
 
     public bool CouldHaveTiers()
     {
-        return TotalTiers > 1;
+        // PoE1: treat any discovered tier list as tiered (matches OLD behavior)
+        return TotalTiers > 0;
     }
 }
