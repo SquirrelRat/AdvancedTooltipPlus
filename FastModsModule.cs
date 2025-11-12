@@ -4,13 +4,10 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using AdvancedTooltip.Settings;
 using ExileCore;
-using ExileCore.PoEMemory.Elements;
-using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
 using RectangleF = SharpDX.RectangleF;
-using UiElement = ExileCore.PoEMemory.MemoryObjects.Element;
 
 namespace AdvancedTooltip;
 
@@ -19,10 +16,7 @@ public class FastModsModule
 {
     private readonly Graphics _graphics;
     private readonly ItemModsSettings _modsSettings;
-    private long _lastTooltipAddress;
-    private UiElement _regularModsElement;
     private readonly List<ModTierInfo> _mods = new List<ModTierInfo>();
-    private static readonly Regex FracturedRegex = new Regex(@"\<fractured\>\{([^\n]*\n[^\n]*)(?:\n\<italic\>\{[^\n]*\})?\}(?=\n|$)", RegexOptions.Compiled);
 
     public FastModsModule(Graphics graphics, ItemModsSettings modsSettings)
     {
@@ -30,23 +24,24 @@ public class FastModsModule
         _modsSettings = modsSettings;
     }
 
-    // New PoE1-stable path: parse tooltip to derive P/S and tiers (no tags)
-    public void DrawUiHoverFastMods(UiElement tooltip)
+    // PoE1-stable path: use parsed ModValue list (no UI Element dependency)
+    public void DrawUiHoverFastMods(List<ModValue> mods, RectangleF tooltipRect)
     {
         try
         {
-            InitializeElements(tooltip);
+            var modTiers = InitializeElements(mods);
+            if (modTiers.Count == 0) return;
 
-            if (_regularModsElement is not { IsVisibleLocal: true } || _mods.Count == 0)
-                return;
+            _mods.Clear();
+            _mods.AddRange(modTiers);
 
-            var rect = _regularModsElement.GetClientRectCache;
-            var height = rect.Height / _mods.Count;
+            var height = _graphics.MeasureText("P1").Y * 1.5f;
+            var fastModsHeight = height * _mods.Count;
 
-            var drawPos = new Vector2(tooltip.GetClientRectCache.X - 3, rect.TopLeft.Y);
+            var drawPos = new Vector2(tooltipRect.X - 6, tooltipRect.TopLeft.Y);
             if (_modsSettings.FastModsAnchor.Value == "Bottom")
             {
-                drawPos.Y = rect.Bottom - height * _mods.Count;
+                drawPos.Y = tooltipRect.BottomLeft.Y - fastModsHeight;
             }
 
             for (var i = 0; i < _mods.Count; i++)
@@ -56,14 +51,13 @@ public class FastModsModule
 
                 var textPos = drawPos.Translate(0, boxHeight / 2);
 
-                var textSize = _graphics.DrawText(modTierInfo.DisplayName,
-                    textPos, modTierInfo.Color,
+                var textSize = _graphics.DrawText(modTierInfo.DisplayName, textPos, modTierInfo.Color,
                     FontAlign.Right | FontAlign.VerticalCenter);
 
                 textSize.X += 5;
                 textPos.X -= textSize.X + 5;
 
-                var rectangleF = new RectangleF(drawPos.X - textSize.X - 3, drawPos.Y, textSize.X + 6,
+                var rectangleF = new RectangleF(drawPos.X - textSize.X, drawPos.Y, textSize.X + 6,
                     height * modTierInfo.ModLines);
                 _graphics.DrawBox(rectangleF, Color.Black);
                 _graphics.DrawFrame(rectangleF, Color.Gray, 1);
@@ -78,188 +72,60 @@ public class FastModsModule
         }
     }
 
-    private void InitializeElements(UiElement tooltip)
+    private List<ModTierInfo> InitializeElements(List<ModValue> modValues)
     {
-        _mods.Clear();
-
-        var modsRoot = tooltip.GetChildAtIndex(1);
-        if (modsRoot == null)
-            return;
-
-        UiElement extendedModsElement = null;
-        UiElement regularModsElement = null;
-        for (var i = modsRoot.Children.Count - 1; i >= 0; i--)
+        var modTierInfo = new List<ModTierInfo>();
+        foreach (var mod in modValues.OrderBy(m => m.AffixType).ThenBy(m => m.Tier))
         {
-            var element = modsRoot.Children[i];
-            if (element.ChildCount is > 2 or 0)
+            // Skip implicits, uniques, and corrupted mods for FastMods
+            if (mod.AffixType == ModType.Unique || mod.AffixType == ModType.Corrupted || mod.IsImplicit)
             {
                 continue;
             }
 
-            var textElements = GetExtendedModsTextElements(element);
-            var elementText = textElements.FirstOrDefault()?.Text;
-            if (!string.IsNullOrEmpty(elementText) &&
-                (elementText.StartsWith("<smaller>", StringComparison.Ordinal) ||
-                 elementText.StartsWith("<fractured>{<smaller>", StringComparison.Ordinal)) &&
-                element.TextNoTags?.StartsWith("Allocated Crucible", StringComparison.Ordinal) != true)
+            // Skip if not a prefix or suffix
+            if (mod.AffixType != ModType.Prefix && mod.AffixType != ModType.Suffix)
             {
-                extendedModsElement = element;
-                regularModsElement = modsRoot.Children[i - 1];
-                break;
-            }
-        }
-
-        if (regularModsElement == null)
-        {
-            _regularModsElement = null;
-            _lastTooltipAddress = default;
-            return;
-        }
-        if (_lastTooltipAddress != tooltip.Address ||
-            _regularModsElement?.Address != regularModsElement.Address)
-        {
-            _lastTooltipAddress = tooltip.Address;
-            _regularModsElement = regularModsElement;
-            ParseItemHover(tooltip, extendedModsElement);
-        }
-    }
-
-    private static List<UiElement> GetExtendedModsTextElements(UiElement element)
-    {
-        return element.Children.SelectMany(x => x.Children).Where(x => x.ChildCount == 1).Select(x => x[0]).Where(x => x != null).ToList();
-    }
-
-    private static string RemoveFractured(string x)
-    {
-        return FracturedRegex.Replace(x, "$1");
-    }
-
-    private void ParseItemHover(UiElement tooltip, UiElement extendedModsElement)
-    {
-        var extendedModsStr = string.Join("\n", GetExtendedModsTextElements(extendedModsElement).Select(x => x.Text));
-        var extendedModsLines = RemoveFractured(extendedModsStr.Replace("\r\n", "\n")).Split('\n');
-
-        var regularModsStr = _regularModsElement.GetTextWithNoTags(2500);
-        var regularModsLines = regularModsStr.Replace("\r\n", "\n").Split('\n');
-
-        ModTierInfo currentModTierInfo = null;
-        var modsDict = new Dictionary<string, ModTierInfo>();
-
-        foreach (var extendedModsLine in extendedModsLines)
-        {
-            if (extendedModsLine.StartsWith("<italic>", StringComparison.Ordinal))
-                continue;
-
-            if (extendedModsLine.StartsWith("<smaller>", StringComparison.Ordinal) || extendedModsLine.StartsWith("<crafted>", StringComparison.Ordinal))
-            {
-                var isPrefix = extendedModsLine.Contains("Prefix");
-                var isSuffix = extendedModsLine.Contains("Suffix");
-                if (!isPrefix && !isSuffix)
-                    continue;
-
-                var affix = isPrefix ? "P" : "S";
-                Color color = isPrefix ? _modsSettings.PrefixColor : _modsSettings.SuffixColor;
-
-                const string tierPrefix = "(Tier: ";
-                const string rankPrefix = "(Rank: ";
-                var tierPos = extendedModsLine.IndexOf(tierPrefix, StringComparison.Ordinal);
-                var isRank = false;
-                if (tierPos != -1)
-                {
-                    tierPos += tierPrefix.Length;
-                }
-                else
-                {
-                    tierPos = extendedModsLine.IndexOf(rankPrefix, StringComparison.Ordinal);
-                    if (tierPos != -1)
-                    {
-                        tierPos += rankPrefix.Length;
-                        isRank = true;
-                    }
-                }
-
-                if (tierPos != -1 &&
-                    (int.TryParse(extendedModsLine.Substring(tierPos, 2), out var tier) ||
-                     int.TryParse(extendedModsLine.Substring(tierPos, 1), out tier)))
-                {
-                    affix += isRank ? $" Rank{tier}" : tier.ToString();
-                    color = tier switch
-                    {
-                        1 => _modsSettings.T1Color,
-                        2 => _modsSettings.T2Color,
-                        3 => _modsSettings.T3Color,
-                        _ => color
-                    };
-                }
-                else if (extendedModsLine.Contains("Essence"))
-                {
-                    affix += "(Ess)";
-                }
-
-                currentModTierInfo = new ModTierInfo(affix, color);
                 continue;
             }
 
-            if (extendedModsLine.StartsWith("<", StringComparison.Ordinal) && !char.IsLetterOrDigit(extendedModsLine[0]))
+            string affix = string.Empty;
+            Color color = Color.White;
+
+            if (mod.AffixType == ModType.Prefix)
             {
-                currentModTierInfo = null;
-                continue;
+                affix = "P";
+                color = _modsSettings.PrefixColor;
+            }
+            else if (mod.AffixType == ModType.Suffix)
+            {
+                affix = "S";
+                color = _modsSettings.SuffixColor;
             }
 
-            if (currentModTierInfo != null)
+            // Color by tier
+            color = mod.Tier switch
             {
-                var modLine = Regex.Replace(extendedModsLine, @"\([\d-.]+\)", string.Empty);
-                modLine = Regex.Replace(modLine, @"[\d-.]+", "#");
-                modLine = Regex.Replace(modLine, @"\s\([\d]+% Increased\)", string.Empty);
-                modLine = modLine.Replace(" (#% Increased)", string.Empty);
-                if (modLine.StartsWith('+'))
-                    modLine = modLine[1..];
+                1 => _modsSettings.T1Color,
+                2 => _modsSettings.T2Color,
+                3 => _modsSettings.T3Color,
+                _ => color
+            };
 
-                modsDict.TryAdd(modLine, currentModTierInfo);
+            // Add tier to display if it exists
+            if (mod.Tier > 0)
+            {
+                affix += mod.Tier;
             }
+            else
+            {
+                affix += "?";
+            }
+
+            var currentModTierInfo = new ModTierInfo(affix, color);
+            modTierInfo.Add(currentModTierInfo);
         }
-
-        var modTierInfos = new List<ModTierInfo>();
-        foreach (var regularModsLine in regularModsLines)
-        {
-            var modFixed = regularModsLine;
-            if (modFixed.StartsWith('+'))
-                modFixed = modFixed[1..];
-            modFixed = Regex.Replace(modFixed, @"[\d-.]+", "#");
-
-            var found = false;
-            foreach (var keyValuePair in modsDict)
-            {
-                if (modFixed.Contains(keyValuePair.Key))
-                {
-                    found = true;
-                    modTierInfos.Add(keyValuePair.Value);
-                    break;
-                }
-            }
-
-            if (!found)
-            {
-                var modTierInfo = new ModTierInfo("?", Color.Gray);
-                modTierInfos.Add(modTierInfo);
-            }
-        }
-
-        if (modTierInfos.Count > 1)
-        {
-            for (var i = 1; i < modTierInfos.Count; i++)
-            {
-                var info = modTierInfos[i];
-                var prevInfo = modTierInfos[i - 1];
-                if (info == prevInfo)
-                {
-                    info.ModLines++;
-                }
-            }
-        }
-
-        _mods.Clear();
-        _mods.AddRange(modTierInfos);
+        return modTierInfo;
     }
 
     private class ModTierInfo

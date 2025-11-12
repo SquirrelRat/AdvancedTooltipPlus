@@ -257,7 +257,7 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
              modsComponent.ItemRarity == ItemRarity.Magic ||
              modsComponent.ItemRarity == ItemRarity.Rare))
         {
-            _fastMods.DrawUiHoverFastMods(tooltip);
+            _fastMods.DrawUiHoverFastMods(mods, origTooltipRect);
         }
     }
 
