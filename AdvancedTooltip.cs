@@ -338,7 +338,7 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
 
         Graphics.DrawText(affixTypeText, position, color);
 
-        if (item.AffixType != ModType.Unique && item.AffixType != ModType.Corrupted)
+        if (item.AffixType != ModType.Unique && item.AffixType != ModType.Corrupted && !item.IsCrafted)
         {
             var totalTiers = item.TotalTiers;
             Color affixTextColor = (item.AffixType, totalTiers > 1) switch

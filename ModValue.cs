@@ -126,11 +126,12 @@ public class ModValue
 
         Logger.Log($"{AffixType} {Record.Group}: Looking up mod record in files..");
 
-        // Skip tier calculation for unique/implicit mods
-        if (AffixType.ToString() == "Unique" || IsImplicit)
+        // Skip tier calculation for unique/implicit/crafted mods
+        if (AffixType.ToString() == "Unique" || IsImplicit || IsCrafted)
         {
             double hue = Tier == 1 ? 180 : 120 - Math.Min(Tier - 1, 3) * 40;
             Color = ConvertHelper.ColorFromHsv(hue, Tier == 1 ? 0 : 1, 1);
+            Tier = 0; // Crafted mods should not have a tier
             return;
         }
 
