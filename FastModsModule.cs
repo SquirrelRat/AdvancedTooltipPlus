@@ -9,6 +9,7 @@ using ExileCore.Shared.Enums;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
 using RectangleF = SharpDX.RectangleF;
+using UiElement = ExileCore.PoEMemory.Elements.Element;
 
 namespace AdvancedTooltip;
 
@@ -18,7 +19,7 @@ public class FastModsModule
     private readonly Graphics _graphics;
     private readonly ItemModsSettings _modsSettings;
     private long _lastTooltipAddress;
-    private Element _regularModsElement;
+    private UiElement _regularModsElement;
     private readonly List<ModTierInfo> _mods = new List<ModTierInfo>();
     private static readonly Regex FracturedRegex = new Regex(@"\<fractured\>\{([^\n]*\n[^\n]*)(?:\n\<italic\>\{[^\n]*\})?\}(?=\n|$)", RegexOptions.Compiled);
 
@@ -29,7 +30,7 @@ public class FastModsModule
     }
 
     // New PoE1-stable path: parse tooltip to derive P/S and tiers (no tags)
-    public void DrawUiHoverFastMods(Element tooltip)
+    public void DrawUiHoverFastMods(UiElement tooltip)
     {
         try
         {
@@ -76,7 +77,7 @@ public class FastModsModule
         }
     }
 
-    private void InitializeElements(Element tooltip)
+    private void InitializeElements(UiElement tooltip)
     {
         _mods.Clear();
 
@@ -84,8 +85,8 @@ public class FastModsModule
         if (modsRoot == null)
             return;
 
-        Element extendedModsElement = null;
-        Element regularModsElement = null;
+        UiElement extendedModsElement = null;
+        UiElement regularModsElement = null;
         for (var i = modsRoot.Children.Count - 1; i >= 0; i--)
         {
             var element = modsRoot.Children[i];
@@ -122,7 +123,7 @@ public class FastModsModule
         }
     }
 
-    private static List<Element> GetExtendedModsTextElements(Element element)
+    private static List<UiElement> GetExtendedModsTextElements(UiElement element)
     {
         return element.Children.SelectMany(x => x.Children).Where(x => x.ChildCount == 1).Select(x => x[0]).Where(x => x != null).ToList();
     }
@@ -132,7 +133,7 @@ public class FastModsModule
         return FracturedRegex.Replace(x, "$1");
     }
 
-    private void ParseItemHover(Element tooltip, Element extendedModsElement)
+    private void ParseItemHover(UiElement tooltip, UiElement extendedModsElement)
     {
         var extendedModsStr = string.Join("\n", GetExtendedModsTextElements(extendedModsElement).Select(x => x.Text));
         var extendedModsLines = RemoveFractured(extendedModsStr.Replace("\r\n", "\n")).Split('\n');
