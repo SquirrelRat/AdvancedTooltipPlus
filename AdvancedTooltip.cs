@@ -20,16 +20,13 @@ namespace AdvancedTooltip;
 
 public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
 {
-    private const string Backdrop = "textures/backdrop.png";
-    private const string BackdropLeft = "textures/backdrop_left.png";
     private Dictionary<int, Color> TColors;
     private FastModsModule _fastMods;
     private HoverItemIcon _hoverItemIcon;
 
     public override void OnLoad()
     {
-        Graphics.InitImage("backdrop.png", Path.Combine(DirectoryFullName, Backdrop));
-        Graphics.InitImage("backdrop_left.png", Path.Combine(DirectoryFullName, BackdropLeft));
+        // No external textures required
     }
 
     public override bool Initialise()
@@ -238,11 +235,13 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
         {
             var itemLevel = "iLVL: " + Convert.ToString(modsComponent?.ItemLevel ?? 0);
             var itemLevelPosition = new Vector2(origTooltipRect.TopLeft.X, origTooltipRect.TopLeft.Y + origTooltipHeaderOffset);
-            var backdropSize = new Vector2(385 * 0.4f, 68 * 0.4f);
-            var backdropPosition = new Vector2(itemLevelPosition.X, itemLevelPosition.Y);
-            Graphics.DrawImage("backdrop_left.png", new RectangleF(backdropPosition.X, backdropPosition.Y, backdropSize.X, backdropSize.Y),
-                Settings.WeaponDps.BackgroundColor);
-            itemLevelPosition = itemLevelPosition.Translate(5, 4);
+            var textSize = Graphics.MeasureText(itemLevel);
+            var padding = new Vector2(6, 4);
+            var boxRect = new RectangleF(itemLevelPosition.X, itemLevelPosition.Y,
+                textSize.X + padding.X * 2, textSize.Y + padding.Y * 2);
+            Graphics.DrawBox(boxRect, Settings.ItemLevel.BackgroundColor);
+            Graphics.DrawFrame(boxRect, Color.Gray, 1);
+            itemLevelPosition = itemLevelPosition.Translate(padding.X, padding.Y);
             Graphics.DrawText(itemLevel, itemLevelPosition, Settings.ItemLevel.TextColor);
         }
 
@@ -562,11 +561,28 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
         }
 
         var textPosition = new Vector2(clientRect.Right - 8, clientRect.Y);
-        var backdropSize = new Vector2(385 * 0.26f, 68 * 0.26f);
-        var backdropPosition = new Vector2(textPosition.X - backdropSize.X + 10, textPosition.Y - 2);
-        Graphics.DrawImage("backdrop.png", new RectangleF(backdropPosition.X, backdropPosition.Y, backdropSize.X, backdropSize.Y),
-            settings.BackgroundColor);
-        textPosition = textPosition.Translate(0, 4);
+        var padding = new Vector2(8, 4);
+
+        // Measure texts to size the background
+        var pDpsText = pDps > 0 ? "pDPS " + pDps.ToString("#") : string.Empty;
+        var eDpsText = eDps > 0 ? "eDPS " + eDps.ToString("#") : string.Empty;
+        var totalText = (pDps + eDps) > 0 ? "Total " + (pDps + eDps).ToString("#") : string.Empty;
+
+        var pSize = string.IsNullOrEmpty(pDpsText) ? Vector2.Zero : Graphics.MeasureText(pDpsText);
+        var eSize = string.IsNullOrEmpty(eDpsText) ? Vector2.Zero : Graphics.MeasureText(eDpsText);
+        var tSize = string.IsNullOrEmpty(totalText) ? Vector2.Zero : Graphics.MeasureText(totalText);
+
+        var maxWidth = Math.Max(pSize.X, Math.Max(eSize.X, tSize.X));
+        var totalHeight = (pSize.Y > 0 ? pSize.Y : 0) + (eSize.Y > 0 ? eSize.Y : 0) + (tSize.Y > 0 ? tSize.Y : 0);
+
+        if (maxWidth > 0 && totalHeight > 0)
+        {
+            var boxRect = new RectangleF(textPosition.X - maxWidth - padding.X * 2 + 2, textPosition.Y,
+                maxWidth + padding.X * 2, totalHeight + padding.Y * 2);
+            Graphics.DrawBox(boxRect, settings.BackgroundColor);
+            Graphics.DrawFrame(boxRect, Color.Gray, 1);
+            textPosition = textPosition.Translate(0, padding.Y);
+        }
         
         var pDpsSize = pDps > 0
             ? Graphics.DrawText("pDPS " + pDps.ToString("#"), textPosition, FontAlign.Right)
