@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using AdvancedTooltip.Settings;
 using ExileCore;
+using ExileCore.PoEMemory.Elements;
 using ExileCore.Shared.Enums;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
@@ -10,11 +12,15 @@ using RectangleF = SharpDX.RectangleF;
 
 namespace AdvancedTooltip;
 
-//it shows the suffix/prefix tier directly near mod on hover item
+// Shows the suffix/prefix tier directly near mod on hover item
 public class FastModsModule
 {
     private readonly Graphics _graphics;
     private readonly ItemModsSettings _modsSettings;
+    private long _lastTooltipAddress;
+    private Element _regularModsElement;
+    private readonly List<ModTierInfo> _mods = new List<ModTierInfo>();
+    private static readonly Regex FracturedRegex = new Regex(@"\<fractured\>\{([^\n]*\n[^\n]*)(?:\n\<italic\>\{[^\n]*\})?\}(?=\n|$)", RegexOptions.Compiled);
 
     public FastModsModule(Graphics graphics, ItemModsSettings modsSettings)
     {
@@ -22,25 +28,28 @@ public class FastModsModule
         _modsSettings = modsSettings;
     }
 
-    public void DrawUiHoverFastMods(List<ModValue> mods, RectangleF tooltip)
+    // New PoE1-stable path: parse tooltip to derive P/S and tiers (no tags)
+    public void DrawUiHoverFastMods(Element tooltip)
     {
         try
         {
-            List<ModTierInfo> modTiers = InitializeElements(mods);
+            InitializeElements(tooltip);
 
-            var height = _graphics.MeasureText("P1").Y * 1.5f;
-            var fastModsHeight = height * modTiers.Count();
+            if (_regularModsElement is not { IsVisibleLocal: true } || _mods.Count == 0)
+                return;
 
-            var drawPos = new Vector2(tooltip.X - 6, tooltip.TopLeft.Y);
+            var rect = _regularModsElement.GetClientRectCache;
+            var height = rect.Height / _mods.Count;
+
+            var drawPos = new Vector2(tooltip.GetClientRectCache.X - 3, rect.TopLeft.Y);
             if (_modsSettings.FastModsAnchor.Value == "Bottom")
             {
-                drawPos.Y = tooltip.BottomLeft.Y - fastModsHeight;
+                drawPos.Y = rect.Bottom - height * _mods.Count;
             }
 
-            for (var i = 0; i < modTiers.Count; i++)
+            for (var i = 0; i < _mods.Count; i++)
             {
-                var modTierInfo = modTiers[i];
-                Logger.Log($"Drawing tier #{i}: {modTierInfo.DisplayName} with tags {string.Join(", ", modTierInfo.ModTags.Select(m => m.Name))}");
+                var modTierInfo = _mods[i];
                 var boxHeight = height * modTierInfo.ModLines;
 
                 var textPos = drawPos.Translate(0, boxHeight / 2);
@@ -52,18 +61,10 @@ public class FastModsModule
                 textSize.X += 5;
                 textPos.X -= textSize.X + 5;
 
-                var initialTextSize = textSize;
-
-                // Tags not supported in PoE1
-                // Tag display code removed for PoE1 compatibility
-
-                var rectangleF = new RectangleF(drawPos.X - textSize.X, drawPos.Y, textSize.X + 6,
+                var rectangleF = new RectangleF(drawPos.X - textSize.X - 3, drawPos.Y, textSize.X + 6,
                     height * modTierInfo.ModLines);
                 _graphics.DrawBox(rectangleF, Color.Black);
                 _graphics.DrawFrame(rectangleF, Color.Gray, 1);
-
-                _graphics.DrawFrame(new RectangleF(drawPos.X - initialTextSize.X, drawPos.Y, initialTextSize.X + 6,
-                    height * modTierInfo.ModLines), Color.Gray, 1);
 
                 drawPos.Y += boxHeight;
                 i += modTierInfo.ModLines - 1;
@@ -75,64 +76,188 @@ public class FastModsModule
         }
     }
 
-    private List<ModTierInfo> InitializeElements(List<ModValue> modValues)
+    private void InitializeElements(Element tooltip)
     {
-        List<ModTierInfo> modTierInfo = new List<ModTierInfo>();
-        foreach (ModValue mod in modValues.OrderBy(m => m.AffixType).ThenBy(m => m.Tier))
+        _mods.Clear();
+
+        var modsRoot = tooltip.GetChildAtIndex(1);
+        if (modsRoot == null)
+            return;
+
+        Element extendedModsElement = null;
+        Element regularModsElement = null;
+        for (var i = modsRoot.Children.Count - 1; i >= 0; i--)
         {
-            // Skip implicits, uniques, and corrupted mods for FastMods
-            if (mod.AffixType == ModType.Unique || mod.AffixType == ModType.Corrupted || mod.IsImplicit)
+            var element = modsRoot.Children[i];
+            if (element.ChildCount is > 2 or 0)
             {
                 continue;
             }
 
-            // Skip if not a prefix or suffix
-            if (mod.AffixType != ModType.Prefix && mod.AffixType != ModType.Suffix)
+            var textElements = GetExtendedModsTextElements(element);
+            var elementText = textElements.FirstOrDefault()?.Text;
+            if (!string.IsNullOrEmpty(elementText) &&
+                (elementText.StartsWith("<smaller>", StringComparison.Ordinal) ||
+                 elementText.StartsWith("<fractured>{<smaller>", StringComparison.Ordinal)) &&
+                element.TextNoTags?.StartsWith("Allocated Crucible", StringComparison.Ordinal) != true)
             {
-                continue;
+                extendedModsElement = element;
+                regularModsElement = modsRoot.Children[i - 1];
+                break;
             }
-
-            string affix = string.Empty;
-            Color color = Color.White;
-            
-            if (mod.AffixType == ModType.Prefix)
-            {
-                affix = "P";
-                color = _modsSettings.PrefixColor;
-            }
-            else if (mod.AffixType == ModType.Suffix)
-            {
-                affix = "S";
-                color = _modsSettings.SuffixColor;
-            }
-
-            // Color by tier
-            color = mod.Tier switch
-            {
-                1 => _modsSettings.T1Color,
-                2 => _modsSettings.T2Color,
-                3 => _modsSettings.T3Color,
-                _ => color
-            };
-            
-            // Add tier to display if it exists
-            if (mod.Tier > 0)
-            {
-                affix += mod.Tier;
-            }
-            else
-            {
-                affix += "?";
-            }
-
-            ModTierInfo currentModTierInfo = new ModTierInfo(affix, color);
-            
-            // Tags don't work in PoE1 (tooltip parsing limitation)
-            // Keeping the structure for potential future enhancement
-            
-            modTierInfo.Add(currentModTierInfo);
         }
-        return modTierInfo;
+
+        if (regularModsElement == null)
+        {
+            _regularModsElement = null;
+            _lastTooltipAddress = default;
+            return;
+        }
+        if (_lastTooltipAddress != tooltip.Address ||
+            _regularModsElement?.Address != regularModsElement.Address)
+        {
+            _lastTooltipAddress = tooltip.Address;
+            _regularModsElement = regularModsElement;
+            ParseItemHover(tooltip, extendedModsElement);
+        }
+    }
+
+    private static List<Element> GetExtendedModsTextElements(Element element)
+    {
+        return element.Children.SelectMany(x => x.Children).Where(x => x.ChildCount == 1).Select(x => x[0]).Where(x => x != null).ToList();
+    }
+
+    private static string RemoveFractured(string x)
+    {
+        return FracturedRegex.Replace(x, "$1");
+    }
+
+    private void ParseItemHover(Element tooltip, Element extendedModsElement)
+    {
+        var extendedModsStr = string.Join("\n", GetExtendedModsTextElements(extendedModsElement).Select(x => x.Text));
+        var extendedModsLines = RemoveFractured(extendedModsStr.Replace("\r\n", "\n")).Split('\n');
+
+        var regularModsStr = _regularModsElement.GetTextWithNoTags(2500);
+        var regularModsLines = regularModsStr.Replace("\r\n", "\n").Split('\n');
+
+        ModTierInfo currentModTierInfo = null;
+        var modsDict = new Dictionary<string, ModTierInfo>();
+
+        foreach (var extendedModsLine in extendedModsLines)
+        {
+            if (extendedModsLine.StartsWith("<italic>", StringComparison.Ordinal))
+                continue;
+
+            if (extendedModsLine.StartsWith("<smaller>", StringComparison.Ordinal) || extendedModsLine.StartsWith("<crafted>", StringComparison.Ordinal))
+            {
+                var isPrefix = extendedModsLine.Contains("Prefix");
+                var isSuffix = extendedModsLine.Contains("Suffix");
+                if (!isPrefix && !isSuffix)
+                    continue;
+
+                var affix = isPrefix ? "P" : "S";
+                Color color = isPrefix ? _modsSettings.PrefixColor : _modsSettings.SuffixColor;
+
+                const string tierPrefix = "(Tier: ";
+                const string rankPrefix = "(Rank: ";
+                var tierPos = extendedModsLine.IndexOf(tierPrefix, StringComparison.Ordinal);
+                var isRank = false;
+                if (tierPos != -1)
+                {
+                    tierPos += tierPrefix.Length;
+                }
+                else
+                {
+                    tierPos = extendedModsLine.IndexOf(rankPrefix, StringComparison.Ordinal);
+                    if (tierPos != -1)
+                    {
+                        tierPos += rankPrefix.Length;
+                        isRank = true;
+                    }
+                }
+
+                if (tierPos != -1 &&
+                    (int.TryParse(extendedModsLine.Substring(tierPos, 2), out var tier) ||
+                     int.TryParse(extendedModsLine.Substring(tierPos, 1), out tier)))
+                {
+                    affix += isRank ? $" Rank{tier}" : tier.ToString();
+                    color = tier switch
+                    {
+                        1 => _modsSettings.T1Color,
+                        2 => _modsSettings.T2Color,
+                        3 => _modsSettings.T3Color,
+                        _ => color
+                    };
+                }
+                else if (extendedModsLine.Contains("Essence"))
+                {
+                    affix += "(Ess)";
+                }
+
+                currentModTierInfo = new ModTierInfo(affix, color);
+                continue;
+            }
+
+            if (extendedModsLine.StartsWith("<", StringComparison.Ordinal) && !char.IsLetterOrDigit(extendedModsLine[0]))
+            {
+                currentModTierInfo = null;
+                continue;
+            }
+
+            if (currentModTierInfo != null)
+            {
+                var modLine = Regex.Replace(extendedModsLine, @"\([\d-.]+\)", string.Empty);
+                modLine = Regex.Replace(modLine, @"[\d-.]+", "#");
+                modLine = Regex.Replace(modLine, @"\s\([\d]+% Increased\)", string.Empty);
+                modLine = modLine.Replace(" (#% Increased)", string.Empty);
+                if (modLine.StartsWith('+'))
+                    modLine = modLine[1..];
+
+                modsDict.TryAdd(modLine, currentModTierInfo);
+            }
+        }
+
+        var modTierInfos = new List<ModTierInfo>();
+        foreach (var regularModsLine in regularModsLines)
+        {
+            var modFixed = regularModsLine;
+            if (modFixed.StartsWith('+'))
+                modFixed = modFixed[1..];
+            modFixed = Regex.Replace(modFixed, @"[\d-.]+", "#");
+
+            var found = false;
+            foreach (var keyValuePair in modsDict)
+            {
+                if (modFixed.Contains(keyValuePair.Key))
+                {
+                    found = true;
+                    modTierInfos.Add(keyValuePair.Value);
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                var modTierInfo = new ModTierInfo("?", Color.Gray);
+                modTierInfos.Add(modTierInfo);
+            }
+        }
+
+        if (modTierInfos.Count > 1)
+        {
+            for (var i = 1; i < modTierInfos.Count; i++)
+            {
+                var info = modTierInfos[i];
+                var prevInfo = modTierInfos[i - 1];
+                if (info == prevInfo)
+                {
+                    info.ModLines++;
+                }
+            }
+        }
+
+        _mods.Clear();
+        _mods.AddRange(modTierInfos);
     }
 
     private class ModTierInfo
@@ -145,23 +270,7 @@ public class FastModsModule
 
         public string DisplayName { get; }
         public Color Color { get; }
-        public List<ModTag> ModTags { get; } = new List<ModTag>();
-
-        /// <summary>
-        /// Mean twinned mod
-        /// </summary>
+        /// <summary>Mean twinned mod</summary>
         public int ModLines { get; set; } = 1;
-    }
-
-    public class ModTag
-    {
-        public ModTag(string name, Color color)
-        {
-            Name = name;
-            Color = color;
-        }
-
-        public string Name { get; }
-        public Color Color { get; }
     }
 }

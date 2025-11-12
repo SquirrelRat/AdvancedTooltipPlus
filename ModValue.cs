@@ -42,8 +42,9 @@ public class ModValue
         IsCrafted = Record.Domain == ModDomain.Crafted;
         IsImplicit = modsComponent?.ImplicitMods?.Any(iMod => iMod.RawName == mod.RawName) ?? false;
         StatValue = mod.Values.ToArray();
-        Tier = 0;
+        Tier = -1;
         var subOptimalTierDistance = 0;
+        tooltip = null; // Disable UI-based parsing for PoE1 stability
 
         // Try to extract tier and tags from tooltip if available
         if (tooltip != null && tooltip.IsValid)
@@ -147,27 +148,85 @@ public class ModValue
             foreach (var tmp in optimizedListTiers)
             {
                 var keyrcd = tmp.Key.Where(char.IsLetter).ToArray();
-
                 if (!keyrcd.SequenceEqual(modRecordKey))
-                {
                     continue;
+
+                if (!tmp.TagChances.TryGetValue(baseClassName, out var baseChance))
+                    baseChance = -1;
+                if (!tmp.TagChances.TryGetValue("default", out var defaultChance))
+                    defaultChance = 0;
+
+                var tagChance = -1;
+                foreach (var tg in baseItem.Tags)
+                {
+                    if (tmp.TagChances.TryGetValue(tg, out var chance))
+                        tagChance = chance;
                 }
 
-                TotalTiers++;
-
-                if (tmp.Equals(Record))
+                var moreTagChance = -1;
+                foreach (var tg in baseItem.MoreTagsFromPath)
                 {
-                    if (Tier <= 0)
-                    {
-                        Tier = TotalTiers;
-                        Logger.Log($"Matched tier {Tier} from recordsByTier for {Record.Key}");
-                    }
-                    tierFound = true;
+                    if (tmp.TagChances.TryGetValue(tg, out var chance))
+                        moreTagChance = chance;
                 }
 
-                if (!tierFound && tmp.MinLevel <= iLvl)
+                switch (baseChance)
                 {
-                    subOptimalTierDistance++;
+                    case 0:
+                        break;
+                    case -1:
+                        switch (tagChance)
+                        {
+                            case 0:
+                                break;
+                            case -1:
+                                switch (moreTagChance)
+                                {
+                                    case 0:
+                                        break;
+                                    case -1:
+                                        if (defaultChance > 0)
+                                        {
+                                            TotalTiers++;
+                                            if (tmp.Equals(Record))
+                                            {
+                                                Tier = TotalTiers;
+                                                tierFound = true;
+                                            }
+                                            if (!tierFound && tmp.MinLevel <= iLvl) subOptimalTierDistance++;
+                                        }
+                                        break;
+                                    default:
+                                        TotalTiers++;
+                                        if (tmp.Equals(Record))
+                                        {
+                                            Tier = TotalTiers;
+                                            tierFound = true;
+                                        }
+                                        if (!tierFound && tmp.MinLevel <= iLvl) subOptimalTierDistance++;
+                                        break;
+                                }
+                                break;
+                            default:
+                                TotalTiers++;
+                                if (tmp.Equals(Record))
+                                {
+                                    Tier = TotalTiers;
+                                    tierFound = true;
+                                }
+                                if (!tierFound && tmp.MinLevel <= iLvl) subOptimalTierDistance++;
+                                break;
+                        }
+                        break;
+                    default:
+                        TotalTiers++;
+                        if (tmp.Equals(Record))
+                        {
+                            Tier = TotalTiers;
+                            tierFound = true;
+                        }
+                        if (!tierFound && tmp.MinLevel <= iLvl) subOptimalTierDistance++;
+                        break;
                 }
             }
 
