@@ -44,7 +44,6 @@ public class ModValue
         StatValue = mod.Values.ToArray();
         Tier = -1;
         var subOptimalTierDistance = 0;
-        tooltip = null; // Disable UI-based parsing for PoE1 stability
 
         // Try to extract tier and tags from tooltip if available
         if (tooltip != null && tooltip.IsValid)

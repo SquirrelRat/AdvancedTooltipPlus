@@ -23,6 +23,11 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
     private Dictionary<int, Color> TColors;
     private FastModsModule _fastMods;
     private HoverItemIcon _hoverItemIcon;
+    // Perf: cache parsed mods for currently hovered item
+    private long _modsCacheItemAddr;
+    private List<ModValue> _modsCache;
+    // Perf: cache minimal affix label width once per session
+    private float _affixTypeMinWidth = -1f;
 
     public override void OnLoad()
     {
@@ -152,8 +157,26 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             ? (modsComponent.Identified ? 80 : 50)
             : 50;
 
-        var mods = itemMods.Select(item => new ModValue(item, GameController.Files, modsComponent.ItemLevel,
-            GameController.Files.BaseItemTypes.Translate(poeEntity.Path), modsComponent, tooltip)).ToList();
+        // Build or reuse ModValue list (PoE1-safe; optional UI parsing)
+        var useUiTierParsing = Settings.ItemMods.UseUiTierParsing.Value;
+        List<ModValue> mods;
+        if (_modsCache != null && _modsCacheItemAddr == poeEntity.Address)
+        {
+            mods = _modsCache;
+        }
+        else
+        {
+            mods = itemMods.Select(item => new ModValue(
+                    item,
+                    GameController.Files,
+                    modsComponent.ItemLevel,
+                    GameController.Files.BaseItemTypes.Translate(poeEntity.Path),
+                    modsComponent,
+                    useUiTierParsing ? tooltip : null)
+                ).ToList();
+            _modsCacheItemAddr = poeEntity.Address;
+            _modsCache = mods;
+        }
 
         // Enhanced Tooltip Display
         if (Settings.ItemMods.EnableTooltip.Value && modsComponent.Identified && modsComponent.ItemRarity != ItemRarity.Normal)
@@ -197,20 +220,20 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             }
         }
 
+        // Precompute tier counts for multiple features
+        bool EligibleForCount(ModValue mv) =>
+            mv.CouldHaveTiers() &&
+            (mv.AffixType == ModType.Prefix || mv.AffixType == ModType.Suffix) &&
+            !mv.IsImplicit &&
+            !mv.IsCrafted;
+        var t1 = mods.Count(item => EligibleForCount(item) && item.Tier == 1);
+        var t2 = mods.Count(item => EligibleForCount(item) && item.Tier == 2);
+        var t3 = mods.Count(item => EligibleForCount(item) && item.Tier == 3);
+
         // Mod Count Display
         if (Settings.ItemMods.EnableModCount)
         {
             var startPosition = new Vector2(origTooltipRect.TopLeft.X, origTooltipRect.TopLeft.Y);
-            // Count only explicit Prefix/Suffix mods that can actually have tiers; exclude implicits, uniques/corrupted, and crafted
-            bool EligibleForCount(ModValue mv) =>
-                mv.CouldHaveTiers() &&
-                (mv.AffixType == ModType.Prefix || mv.AffixType == ModType.Suffix) &&
-                !mv.IsImplicit &&
-                !mv.IsCrafted;
-
-            var t1 = mods.Count(item => EligibleForCount(item) && item.Tier == 1);
-            var t2 = mods.Count(item => EligibleForCount(item) && item.Tier == 2);
-            var t3 = mods.Count(item => EligibleForCount(item) && item.Tier == 3);
             if (t1 + t2 + t3 > 0)
             {
                 var tierNoteHeight = Graphics.MeasureText("T").Y * (Math.Sign(t1) + Math.Sign(t2) + Math.Sign(t3)) + 5;
@@ -237,6 +260,38 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             }
         }
 
+        // Quick-glance visual highlight: colored frame based on highest tier present
+        if (Settings.ItemMods.EnableItemHighlight)
+        {
+            Color frameColor = Color.Gray;
+            if (t1 > 0) frameColor = Settings.ItemMods.T1Color;
+            else if (t2 > 0) frameColor = Settings.ItemMods.T2Color;
+            else if (t3 > 0) frameColor = Settings.ItemMods.T3Color;
+
+            // Slightly thicker frame for visibility
+            Graphics.DrawFrame(origTooltipRect, frameColor, 2);
+        }
+
+        // Grade badge in the top-right corner (S/A/B) for fast judgment
+        if (Settings.ItemMods.EnableGradeBadge && (t1 + t2 + t3) > 0)
+        {
+            string grade = t1 > 0 ? "S" : t2 > 0 ? "A" : t3 > 0 ? "B" : string.Empty;
+            if (!string.IsNullOrEmpty(grade))
+            {
+                var badgePadding = new Vector2(6, 2);
+                var size = Graphics.MeasureText(grade);
+                var box = new RectangleF(origTooltipRect.Right - size.X - badgePadding.X * 2 - 4,
+                                         origTooltipRect.Top + 4,
+                                         size.X + badgePadding.X * 2,
+                                         size.Y + badgePadding.Y * 2);
+                var gradeColor = t1 > 0 ? Settings.ItemMods.T1Color.Value : t2 > 0 ? Settings.ItemMods.T2Color.Value : Settings.ItemMods.T3Color.Value;
+                Graphics.DrawBox(box, new Color(0,0,0,180));
+                Graphics.DrawFrame(box, gradeColor, 1);
+                var textPos = new Vector2(box.X + badgePadding.X, box.Y + badgePadding.Y);
+                Graphics.DrawText(grade, textPos, gradeColor);
+            }
+        }
+
         // Item Level Display
         if (Settings.ItemLevel.Enable.Value)
         {
@@ -252,11 +307,7 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             Graphics.DrawText(itemLevel, itemLevelPosition, Settings.ItemLevel.TextColor);
         }
 
-        // Weapon DPS Display
-        if (Settings.WeaponDps.EnableWeaponDps && poeEntity.TryGetComponent<Weapon>(out var weaponComponent))
-        {
-            DrawWeaponDps(origTooltipRect, origTooltipHeaderOffset, poeEntity, mods, weaponComponent);
-        }
+        // Weapon DPS Display removed
 
         // Fast Mods Display
         if (Settings.ItemMods.EnableFastMods &&
@@ -339,8 +390,9 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
         }
 
         var affixTypeWidth = Graphics.MeasureText(affixTypeText + " ").X;
-        var affixTypeMinWidth = Graphics.MeasureText("[P] ").X;
-        affixTypeWidth = Math.Max(affixTypeMinWidth, affixTypeWidth);
+        if (_affixTypeMinWidth < 0)
+            _affixTypeMinWidth = Graphics.MeasureText("[P] ").X;
+        affixTypeWidth = Math.Max(_affixTypeMinWidth, affixTypeWidth);
 
         Graphics.DrawText(affixTypeText, position, color);
 
@@ -471,155 +523,5 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             "Gem Level" => new Color(200, 230, 160),
             _ => Color.Gray
         };
-    }
-
-    private void DrawWeaponDps(RectangleF clientRect, float headerOffset, Entity itemEntity, List<ModValue> modValues, Weapon weaponComponent)
-    {
-        if (weaponComponent == null) return;
-        if (!itemEntity.IsValid) return;
-        var aSpd = (float)Math.Round(1000f / weaponComponent.AttackTime, 2);
-        var cntDamages = Enum.GetValues(typeof(DamageType)).Length;
-        var doubleDpsPerStat = new float[cntDamages];
-        float physDmgMultiplier = 1;
-        var physHi = weaponComponent.DamageMax;
-        var physLo = weaponComponent.DamageMin;
-
-        foreach (var mod in modValues)
-        {
-            foreach (var (stat, range, value) in mod.Record.StatNames.Zip(mod.Record.StatRange, mod.StatValue))
-            {
-                if (range.Min == 0 && range.Max == 0) continue;
-                if (stat == null) continue;
-
-                switch (stat.Key)
-                {
-                    case "physical_damage_+%":
-                    case "local_physical_damage_+%":
-                        physDmgMultiplier += value / 100f;
-                        break;
-
-                    case "local_attack_speed_+%":
-                        aSpd *= (100f + value) / 100;
-                        break;
-
-                    case "local_minimum_added_physical_damage":
-                        physLo += value;
-                        break;
-                    case "local_maximum_added_physical_damage":
-                        physHi += value;
-                        break;
-
-                    case "local_minimum_added_fire_damage":
-                    case "local_maximum_added_fire_damage":
-                    case "unique_local_minimum_added_fire_damage_when_in_main_hand":
-                    case "unique_local_maximum_added_fire_damage_when_in_main_hand":
-                        doubleDpsPerStat[(int)DamageType.Fire] += value;
-                        break;
-
-                    case "local_minimum_added_cold_damage":
-                    case "local_maximum_added_cold_damage":
-                    case "unique_local_minimum_added_cold_damage_when_in_off_hand":
-                    case "unique_local_maximum_added_cold_damage_when_in_off_hand":
-                        doubleDpsPerStat[(int)DamageType.Cold] += value;
-                        break;
-
-                    case "local_minimum_added_lightning_damage":
-                    case "local_maximum_added_lightning_damage":
-                        doubleDpsPerStat[(int)DamageType.Lightning] += value;
-                        break;
-
-                    case "unique_local_minimum_added_chaos_damage_when_in_off_hand":
-                    case "unique_local_maximum_added_chaos_damage_when_in_off_hand":
-                    case "local_minimum_added_chaos_damage":
-                    case "local_maximum_added_chaos_damage":
-                        doubleDpsPerStat[(int)DamageType.Chaos] += value;
-                        break;
-                }
-            }
-        }
-
-        var settings = Settings.WeaponDps;
-
-        Color[] elementalDmgColors =
-        {
-            Color.White, settings.DmgFireColor, settings.DmgColdColor, settings.DmgLightningColor,
-            settings.DmgChaosColor
-        };
-
-        var component = itemEntity.GetComponent<Quality>();
-        if (component == null) return;
-        
-        var qualityMultiplier = (component.ItemQuality + 100) / 100f;
-        if (Settings.WeaponDps.AlwaysFullQuality && qualityMultiplier < 1.2f)
-        {
-            qualityMultiplier = 1.2f;
-        }
-        
-        physLo = (int)Math.Round(physLo * qualityMultiplier * physDmgMultiplier);
-        physHi = (int)Math.Round(physHi * qualityMultiplier * physDmgMultiplier);
-        doubleDpsPerStat[(int)DamageType.Physical] = physLo + physHi;
-
-        aSpd = (float)Math.Round(aSpd, 2);
-        var pDps = doubleDpsPerStat[(int)DamageType.Physical] / 2 * aSpd;
-        float eDps = 0;
-        var firstEmg = 0;
-        Color dpsColor = settings.PhysicalDamageColor;
-
-        for (var i = 1; i < cntDamages; i++)
-        {
-            eDps += doubleDpsPerStat[i] / 2 * aSpd;
-            if (!(doubleDpsPerStat[i] > 0)) continue;
-
-            if (firstEmg == 0)
-            {
-                firstEmg = i;
-                dpsColor = elementalDmgColors[i];
-            }
-            else
-                dpsColor = settings.ElementalDamageColor;
-        }
-
-        var textPosition = new Vector2(clientRect.Right - 8, clientRect.Y);
-        var padding = new Vector2(8, 4);
-
-        // Measure texts to size the background
-        var pDpsText = pDps > 0 ? "pDPS " + pDps.ToString("#") : string.Empty;
-        var eDpsText = eDps > 0 ? "eDPS " + eDps.ToString("#") : string.Empty;
-        var totalText = (pDps + eDps) > 0 ? "Total " + (pDps + eDps).ToString("#") : string.Empty;
-
-        var pSize = string.IsNullOrEmpty(pDpsText) ? Vector2.Zero : Graphics.MeasureText(pDpsText);
-        var eSize = string.IsNullOrEmpty(eDpsText) ? Vector2.Zero : Graphics.MeasureText(eDpsText);
-        var tSize = string.IsNullOrEmpty(totalText) ? Vector2.Zero : Graphics.MeasureText(totalText);
-
-        var maxWidth = Math.Max(pSize.X, Math.Max(eSize.X, tSize.X));
-        var totalHeight = (pSize.Y > 0 ? pSize.Y : 0) + (eSize.Y > 0 ? eSize.Y : 0) + (tSize.Y > 0 ? tSize.Y : 0);
-
-        if (maxWidth > 0 && totalHeight > 0)
-        {
-            var boxRect = new RectangleF(textPosition.X - maxWidth - padding.X * 2 + 2, textPosition.Y,
-                maxWidth + padding.X * 2, totalHeight + padding.Y * 2);
-            Graphics.DrawBox(boxRect, settings.BackgroundColor);
-            Graphics.DrawFrame(boxRect, Color.Gray, 1);
-            textPosition = textPosition.Translate(0, padding.Y);
-        }
-        
-        var pDpsSize = pDps > 0
-            ? Graphics.DrawText("pDPS " + pDps.ToString("#"), textPosition, FontAlign.Right)
-            : Vector2.Zero;
-
-        var eDpsSize = eDps > 0
-            ? Graphics.DrawText("eDPS " + eDps.ToString("#"), textPosition.Translate(0, pDpsSize.Y), dpsColor,
-                FontAlign.Right)
-            : Vector2.Zero;
-
-        var dps = pDps + eDps;
-
-        if (dps >= pDps || dps >= eDps)
-        {
-            var dpsSize = dps > 0
-                ? Graphics.DrawText("Total " + dps.ToString("#"), textPosition.Translate(0, pDpsSize.Y + eDpsSize.Y),
-                    Color.White, FontAlign.Right)
-                : Vector2.Zero;
-        }
     }
 }

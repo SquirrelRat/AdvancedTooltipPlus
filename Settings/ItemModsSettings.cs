@@ -33,7 +33,7 @@ public class ItemModsSettings
     
     [Menu("Enable Mod Count", "Display T1/T2/T3 mod counter in corner")]
     public ToggleNode EnableModCount { get; set; } = new(true);
-    
+
     [Menu("Enable Fast Mods", "Show quick mod tier info next to tooltip")]
     public ToggleNode EnableFastMods { get; set; } = new ToggleNode(false);
     
@@ -46,6 +46,15 @@ public class ItemModsSettings
     public ColorNode T1Color { get; set; } = new ColorBGRA(255, 0, 255, 255);
     public ColorNode T2Color { get; set; } = new ColorBGRA(0, 255, 255, 255);
     public ColorNode T3Color { get; set; } = new ColorBGRA(0, 255, 0, 255);
+    
+    [Menu("Enable Item Highlight", "Draw a colored frame around the tooltip based on highest tier present (T1/T2/T3)")]
+    public ToggleNode EnableItemHighlight { get; set; } = new ToggleNode(true);
+
+    [Menu("Enable Grade Badge", "Show a compact letter grade (S/A/B/C) on the tooltip for at-a-glance quality")]
+    public ToggleNode EnableGradeBadge { get; set; } = new ToggleNode(true);
+
+    [Menu("Use UI Tier Parsing (experimental)", "Try to parse Tier/Tags from the tooltip UI. May be unstable; PoE1-only.")]
+    public ToggleNode UseUiTierParsing { get; set; } = new ToggleNode(false);
     
     [Menu("Dump Mod Names", "Hotkey to copy mod names to clipboard (for debugging)")]
     public HotkeyNode DumpModNames { get; set; } = new HotkeyNode(System.Windows.Forms.Keys.None);
