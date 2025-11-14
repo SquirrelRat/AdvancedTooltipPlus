@@ -133,6 +133,11 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
 
     public override void Render()
     {
+        if (string.IsNullOrEmpty(_hoverItemIcon?.Item?.Path))
+        {
+            return;
+        }
+
         if (_hoverItemIcon is not { ToolTipType: not ToolTipType.None, ItemFrame: { } tooltip })
         {
             return;
