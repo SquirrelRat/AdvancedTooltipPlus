@@ -262,7 +262,8 @@ public class ModValue
 
     public bool CouldHaveTiers()
     {
-        // PoE1: treat any discovered tier list as tiered (matches OLD behavior)
-        return TotalTiers > 0;
+        // Consider tiered only when there is more than 1 possible tier
+        // This avoids counting non-tiered mods as T1 by default
+        return TotalTiers > 1 && Tier > 0;
     }
 }

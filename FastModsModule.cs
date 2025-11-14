@@ -75,13 +75,20 @@ public class FastModsModule
     private List<ModTierInfo> InitializeElements(List<ModValue> modValues)
     {
         var modTierInfo = new List<ModTierInfo>();
-        foreach (var mod in modValues
-                     .Where(m => m.AffixType == ModType.Prefix || m.AffixType == ModType.Suffix)
-                     .Where(m => !m.IsImplicit && m.AffixType != ModType.Unique && m.AffixType != ModType.Corrupted)
-                     .Where(m => !m.IsCrafted) // crafted mods: no tiers, skip to avoid P?/S?
-                     .OrderBy(m => m.AffixType)
-                     .ThenBy(m => m.Tier > 0 ? m.Tier : int.MaxValue))
+        foreach (var mod in modValues.OrderBy(m => m.AffixType).ThenBy(m => m.Tier))
         {
+            // Skip implicits, uniques, corrupted, and crafted mods for FastMods
+            if (mod.AffixType == ModType.Unique || mod.AffixType == ModType.Corrupted || mod.IsImplicit || mod.IsCrafted)
+            {
+                continue;
+            }
+
+            // Skip if not a prefix or suffix
+            if (mod.AffixType != ModType.Prefix && mod.AffixType != ModType.Suffix)
+            {
+                continue;
+            }
+
             string affix = string.Empty;
             Color color = Color.White;
 
@@ -96,7 +103,7 @@ public class FastModsModule
                 color = _modsSettings.SuffixColor;
             }
 
-            // Color by tier if known, otherwise keep base color
+            // Color by tier
             color = mod.Tier switch
             {
                 1 => _modsSettings.T1Color,
@@ -105,10 +112,14 @@ public class FastModsModule
                 _ => color
             };
 
-            // Append tier if known; otherwise show just P/S (no '?')
+            // Add tier to display if it exists
             if (mod.Tier > 0)
             {
                 affix += mod.Tier;
+            }
+            else
+            {
+                affix += "?";
             }
 
             var currentModTierInfo = new ModTierInfo(affix, color);

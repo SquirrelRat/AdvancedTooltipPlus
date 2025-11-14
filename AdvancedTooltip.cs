@@ -201,9 +201,16 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
         if (Settings.ItemMods.EnableModCount)
         {
             var startPosition = new Vector2(origTooltipRect.TopLeft.X, origTooltipRect.TopLeft.Y);
-            var t1 = mods.Count(item => item.CouldHaveTiers() && item.Tier == 1 && (item.AffixType == ModType.Prefix || item.AffixType == ModType.Suffix));
-            var t2 = mods.Count(item => item.CouldHaveTiers() && item.Tier == 2 && (item.AffixType == ModType.Prefix || item.AffixType == ModType.Suffix));
-            var t3 = mods.Count(item => item.CouldHaveTiers() && item.Tier == 3 && (item.AffixType == ModType.Prefix || item.AffixType == ModType.Suffix));
+            // Count only explicit Prefix/Suffix mods that can actually have tiers; exclude implicits, uniques/corrupted, and crafted
+            bool EligibleForCount(ModValue mv) =>
+                mv.CouldHaveTiers() &&
+                (mv.AffixType == ModType.Prefix || mv.AffixType == ModType.Suffix) &&
+                !mv.IsImplicit &&
+                !mv.IsCrafted;
+
+            var t1 = mods.Count(item => EligibleForCount(item) && item.Tier == 1);
+            var t2 = mods.Count(item => EligibleForCount(item) && item.Tier == 2);
+            var t3 = mods.Count(item => EligibleForCount(item) && item.Tier == 3);
             if (t1 + t2 + t3 > 0)
             {
                 var tierNoteHeight = Graphics.MeasureText("T").Y * (Math.Sign(t1) + Math.Sign(t2) + Math.Sign(t3)) + 5;
@@ -409,13 +416,19 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             }
         }
 
-        // Display human-readable mod text with stats
+        // Display human-readable mod text with stats (always advance at least one line height to avoid overlaps)
+        var lineHeight = Graphics.MeasureText("A").Y; // baseline line height
         if (!string.IsNullOrEmpty(item.HumanName))
         {
             var displayText = item.HumanName;
-            var txSize = Graphics.DrawText(Settings.ItemMods.StartStatsOnSameLine ? $" {displayText}" : $"{displayText}", 
+            var txSize = Graphics.DrawText(Settings.ItemMods.StartStatsOnSameLine ? $" {displayText}" : $"{displayText}",
                 position.Translate(affixTypeWidth), Color.Gainsboro);
-            position.Y += txSize.Y;
+            position.Y += Math.Max(txSize.Y, lineHeight);
+        }
+        else if (!Settings.ItemMods.StartStatsOnSameLine)
+        {
+            // When not on the same line, still bump Y by one line to keep spacing consistent
+            position.Y += lineHeight;
         }
 
         // Show stat names for debugging if enabled
@@ -429,9 +442,15 @@ public class AdvancedTooltip : BaseSettingsPlugin<AdvancedTooltipSettings>
             }
         }
 
-        return Math.Abs(position.Y - oldPosition.Y) > epsilon
-            ? oldPosition with { Y = position.Y + marginBottom }
-            : oldPosition;
+        // Final safety: ensure we always advance by at least one line height
+        // This prevents overlaps when, for example, StartStatsOnSameLine is true and there's no HumanName/tags drawn.
+        if (Math.Abs(position.Y - oldPosition.Y) < epsilon)
+        {
+            var minLine = Graphics.MeasureText("A").Y;
+            position.Y = oldPosition.Y + minLine;
+        }
+
+        return oldPosition with { Y = position.Y + marginBottom };
     }
 
     private Color GetTagColor(string tag)
